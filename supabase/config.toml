@@ -1,0 +1,2 @@
+[functions.pole-api]
+verify_jwt = false
