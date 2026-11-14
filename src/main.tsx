@@ -7,204 +7,64 @@ import { api, getToken, setToken, clearToken } from './api';
 import './style.css';
 
 type Project = { id: string; name: string; created_at: string; source_filename: string | null };
-type Page = 'map' | 'spreadsheet' | 'lists';
-function keyOf(s: string) { return s.toLowerCase().replace(/[^a-z0-9]/g, ''); }
-function findValue(row: Record<string, unknown>, aliases: string[]) {
-  const k = Object.keys(row).find(x => aliases.includes(keyOf(x)));
-  return k ? row[k] : '';
-}
-function exchangeOf(p: Pole) {
-  const entry = Object.entries(p.data || {}).find(([k, v]) =>
-    ['exchange', 'exchangename', 'exchangecode', 'exchangeid', 'exchangearea'].includes(keyOf(k)) && String(v ?? '').trim());
-  return entry ? String(entry[1]).trim() : '';
-}
+type Page = 'map' | 'poles' | 'projects' | 'settings';
+type RawRow = Record<string, unknown>;
+const STATUS = ['Outstanding', 'Completed', 'Problem'];
+const cleanKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+const displayDate = (s: string) => { try { return new Date(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; } };
+function exchangeOf(p: Pole) { const found = Object.entries(p.data || {}).find(([k,v]) => ['exchange','exchangename','exchangecode','exchangeid','exchangearea'].includes(cleanKey(k)) && String(v ?? '').trim()); return found ? String(found[1]).trim() : ''; }
+function findColumn(cols: string[], aliases: string[]) { return cols.find(c => aliases.includes(cleanKey(c))) || ''; }
 
 function Login({ onLogin }: { onLogin: () => void }) {
-  const [p, setP] = useState(''), [err, setErr] = useState(''), [busy, setBusy] = useState(false);
-  async function submit(e: React.FormEvent) {
-    e.preventDefault(); setBusy(true); setErr('');
-    try { const d = await api('login', { password: p }); setToken(d.token); onLogin(); }
-    catch (x) { setErr(x instanceof Error ? x.message : 'Login failed'); }
-    finally { setBusy(false); }
-  }
-  return <div className="login-wrap"><form className="login-card" onSubmit={submit}>
-    <div className="brand-mark">PT</div><p className="eyebrow">FIELD OPERATIONS</p><h1>Pole Tracker</h1>
-    <p className="muted">Sign in to the shared pole tracking workspace.</p><label>Shared password</label>
-    <input type="password" value={p} onChange={e => setP(e.target.value)} autoFocus required />
-    <button className="primary full" disabled={busy || !p}>{busy ? 'Signing in…' : 'Sign in'}</button>
-    {err && <p className="error">{err}</p>}<p className="tiny muted">Access is shared with authorised team members.</p>
-  </form></div>;
+  const [password,setPassword]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+  async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');try{const d=await api('login',{password});setToken(d.token);onLogin();}catch(x){setError(x instanceof Error?x.message:'Sign in failed');}finally{setBusy(false);}}
+  return <div className="login-screen"><form className="login-card" onSubmit={submit}><div className="brand-symbol">PT</div><span className="kicker">FIELD OPERATIONS</span><h1>Pole Tracker</h1><p>Sign in to your shared pole workspace.</p><label>Shared password</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required/><button className="btn primary wide" disabled={busy||!password}>{busy?'Signing in…':'Sign in'}</button>{error&&<p className="error">{error}</p>}<small>For authorised team members</small></form></div>;
 }
 
-function Tracker({ onLogout }: { onLogout: () => void }) {
-  const [projects, setProjects] = useState<Project[]>([]), [projectId, setProjectId] = useState('');
-  const [poles, setPoles] = useState<Pole[]>([]), [selected, setSelected] = useState<Pole | null>(null);
-  const [search, setSearch] = useState(''), [status, setStatus] = useState('All'), [exchangeFilters, setExchangeFilters] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true), [message, setMessage] = useState('');
-  const [projectName, setProjectName] = useState(''), [file, setFile] = useState<File | null>(null), [showImport, setShowImport] = useState(false);
-  const [page, setPage] = useState<Page>('map'), [spreadsheetDraft, setSpreadsheetDraft] = useState<Pole[]>([]), [savingSheet, setSavingSheet] = useState(false), [refreshing, setRefreshing] = useState(false);
-  const [listStatus, setListStatus] = useState<'Outstanding' | 'Completed' | 'Problem'>('Outstanding');
+function Tracker({onLogout}:{onLogout:()=>void}) {
+  const [projects,setProjects]=useState<Project[]>([]),[projectId,setProjectId]=useState(''),[poles,setPoles]=useState<Pole[]>([]);
+  const [page,setPage]=useState<Page>('map'),[theme,setTheme]=useState<'dark'|'light'>(()=>(localStorage.getItem('pole-theme') as 'dark'|'light')||'dark');
+  const [search,setSearch]=useState(''),[statusFilter,setStatusFilter]=useState('All'),[exchangeFilter,setExchangeFilter]=useState('All');
+  const [selected,setSelected]=useState<Pole|null>(null),[message,setMessage]=useState(''),[loading,setLoading]=useState(true),[busy,setBusy]=useState(false);
+  const [showImport,setShowImport]=useState(false),[file,setFile]=useState<File|null>(null),[workbookRows,setWorkbookRows]=useState<RawRow[]>([]),[columns,setColumns]=useState<string[]>([]),[projectName,setProjectName]=useState(''),[poleColumn,setPoleColumn]=useState(''),[gridColumn,setGridColumn]=useState(''),[exchangeColumn,setExchangeColumn]=useState('');
+  const [showEdit,setShowEdit]=useState(false),[editPole,setEditPole]=useState<Pole|null>(null);
 
-  async function loadProjects() {
-    const d = await api('projects', {}, 'GET'); setProjects(d.projects || []);
-    setProjectId(current => current && d.projects?.some((p: Project) => p.id === current) ? current : (d.projects?.[0]?.id || ''));
-    setLoading(false);
-  }
-  async function loadPoles(id: string) {
-    if (!id) { setPoles([]); setSelected(null); return; }
-    const d = await api('poles', { project_id: id }, 'GET'); setPoles(d.poles || []); setSelected(null);
-  }
-  useEffect(() => { loadProjects().catch(e => { setMessage(e.message); setLoading(false); }); }, []);
-  useEffect(() => { loadPoles(projectId).catch(e => setMessage(e.message)); }, [projectId]);
-  // Deliberately no timed polling: the old 12-second refresh cleared the selected pole and
-  // reloaded the entire list, which looked like the page was repeatedly refreshing.
-
-  const exchanges = useMemo(() => [...new Set(poles.map(exchangeOf).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [poles]);
-  const filtered = useMemo(() => poles.filter(p =>
-    (status === 'All' || p.status === status) &&
-    (exchangeFilters.length === 0 || exchangeFilters.includes(exchangeOf(p))) &&
-    (`${p.pole_ref} ${p.grid_reference} ${p.notes} ${exchangeOf(p)} ${JSON.stringify(p.data)}`).toLowerCase().includes(search.toLowerCase())
-  ), [poles, status, exchangeFilters, search]);
-  const done = poles.filter(p => p.status === 'Completed').length, problems = poles.filter(p => p.status === 'Problem').length;
-  const outstanding = poles.length - done - problems;
-  const columns = useMemo(() => [...new Set(poles.flatMap(p => Object.keys(p.data || {})))], [poles]);
-  const draftColumns = useMemo(() => [...new Set(spreadsheetDraft.flatMap(p => Object.keys(p.data || {})))], [spreadsheetDraft]);
-  const listRows = useMemo(() => poles.filter(p => p.status === listStatus && (`${p.pole_ref} ${p.grid_reference} ${p.notes} ${exchangeOf(p)} ${JSON.stringify(p.data)}`).toLowerCase().includes(search.toLowerCase())), [poles, listStatus, search]);
-
-  async function refreshData() {
-    if (!projectId) return; setRefreshing(true);
-    try { const d = await api('poles', { project_id: projectId }, 'GET'); const next: Pole[] = d.poles || []; setPoles(next); setSelected(current => current ? next.find(p => p.id === current.id) || null : null); setMessage('Project data refreshed.'); }
-    catch (e) { setMessage(e instanceof Error ? e.message : 'Could not refresh project data.'); }
-    finally { setRefreshing(false); }
-  }
-  async function importFile() {
-    if (!file || !projectName.trim()) return;
-    setMessage('Reading spreadsheet…');
-    try {
-      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
-      const parsed = raw.map(row => {
-        const grid = String(findValue(row, ['gridreference', 'gridref', 'osgridreference', 'osgridref', 'nationalgridreference', 'ngr'])).trim();
-        const coords = gridRefToLatLng(grid);
-        return { pole_ref: String(findValue(row, ['poleref', 'polenumber', 'poleid', 'assetid', 'reference']) || ''), grid_reference: grid, ...(coords || {}), data: row };
-      }).filter(p => 'latitude' in p);
-      if (!parsed.length) throw new Error('No valid British National Grid references found. Check the column headings and values.');
-      const d = await api('create_project', { name: projectName, filename: file.name, poles: parsed });
-      setMessage(`Imported ${d.imported} poles successfully.`); setShowImport(false); setProjectName(''); setFile(null);
-      await loadProjects(); setProjectId(d.project.id);
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Import failed.'); }
-  }
-  async function savePole() {
-    if (!selected) return;
-    try {
-      const d = await api('update_pole', { id: selected.id, status: selected.status, notes: selected.notes, data: selected.data });
-      setPoles(old => old.map(p => p.id === selected.id ? d.pole : p)); setSelected(null); setMessage('Pole updated.');
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Save failed.'); }
-  }
-  async function renameProject() {
-    const current = projects.find(p => p.id === projectId); if (!current) return;
-    const next = window.prompt('Enter a new project name:', current.name)?.trim();
-    if (!next || next === current.name) return;
-    try { await api('rename_project', { id: projectId, name: next }); setProjects(old => old.map(p => p.id === projectId ? { ...p, name: next } : p)); setMessage('Project renamed.'); }
-    catch (e) { setMessage(e instanceof Error ? e.message : 'Could not rename project.'); }
-  }
-  async function deleteProject() {
-    const current = projects.find(p => p.id === projectId); if (!current) return;
-    if (!window.confirm(`Delete "${current.name}" and all ${poles.length} poles in it? This cannot be undone.`)) return;
-    try {
-      await api('delete_project', { id: projectId });
-      const remaining = projects.filter(p => p.id !== projectId); setProjects(remaining); setPoles([]); setSelected(null);
-      setProjectId(remaining[0]?.id || ''); setMessage('Project deleted.');
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Could not delete project.'); }
-  }
-  function openSpreadsheet() { setSpreadsheetDraft(poles.map(p => ({ ...p, data: { ...(p.data || {}) } }))); setPage('spreadsheet'); }
-  function editDraft(id: string, column: string, value: string) {
-    setSpreadsheetDraft(rows => rows.map(p => p.id === id ? { ...p, data: { ...p.data, [column]: value } } : p));
-  }
-  function addColumn() {
-    const name = window.prompt('New column name:')?.trim(); if (!name) return;
-    if (draftColumns.some(c => keyOf(c) === keyOf(name))) { setMessage('A column with that name already exists.'); return; }
-    setSpreadsheetDraft(rows => rows.map(p => ({ ...p, data: { ...p.data, [name]: '' } }))); setMessage(`Column "${name}" added. Save changes to apply it.`);
-  }
-  function renameColumn(oldName: string) {
-    const name = window.prompt(`Rename column "${oldName}" to:`, oldName)?.trim(); if (!name || name === oldName) return;
-    if (draftColumns.some(c => c !== oldName && keyOf(c) === keyOf(name))) { setMessage('A column with that name already exists.'); return; }
-    setSpreadsheetDraft(rows => rows.map(p => { const data = { ...p.data }; data[name] = data[oldName] ?? ''; delete data[oldName]; return { ...p, data }; }));
-  }
-  function deleteColumn(name: string) {
-    if (!window.confirm(`Remove the "${name}" column from every pole in this project?`)) return;
-    setSpreadsheetDraft(rows => rows.map(p => { const data = { ...p.data }; delete data[name]; return { ...p, data }; }));
-  }
-  async function saveSpreadsheet() {
-    setSavingSheet(true); setMessage('Saving spreadsheet changes…');
-    try {
-      const updates = spreadsheetDraft.map(p => ({ id: p.id, status: p.status, notes: p.notes, data: p.data }));
-      await api('update_poles', { poles: updates });
-      setPoles(spreadsheetDraft); setMessage(`Saved changes to ${spreadsheetDraft.length} pole records.`); setPage('map');
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Could not save spreadsheet changes.'); }
-    finally { setSavingSheet(false); }
-  }
-
-  if (loading) return <div className="loading-screen">Loading Pole Tracker…</div>;
-  const currentProject = projects.find(p => p.id === projectId);
-  return <main className="app-shell">
-    <header className="topbar"><div className="brand"><div className="brand-mark small">PT</div><div><strong>Pole Tracker</strong><span>FIELD OPERATIONS</span></div></div>
-      <div className="top-actions"><span className="live-dot">Shared workspace</span><button className="ghost" onClick={() => { clearToken(); onLogout(); }}>Sign out</button></div>
-    </header>
-    <section className="page-heading"><div><p className="eyebrow">TEAM OVERVIEW</p><h1>{page === 'map' ? 'Project map' : page === 'spreadsheet' ? 'Spreadsheet editor' : 'Pole lists'}</h1><p className="muted">{currentProject?.name || 'Select or import a project'}{page === 'spreadsheet' ? ' · Edit cells and manage columns' : page === 'lists' ? ' · View records without the map' : ' · Explore locations and update field records'}</p></div>
-      <div className="heading-actions">{page !== 'spreadsheet' && <button className="ghost" disabled={!projectId || refreshing} onClick={refreshData}>{refreshing ? 'Refreshing…' : '↻ Refresh data'}</button>}<button className="primary" onClick={() => { setShowImport(true); setMessage(''); }}>＋ Import spreadsheet</button></div></section>
-    <nav className="page-tabs"><button className={page === 'map' ? 'active' : ''} onClick={() => setPage('map')}>Map</button><button className={page === 'spreadsheet' ? 'active' : ''} onClick={openSpreadsheet} disabled={!projectId}>Spreadsheet editor</button><button className={page === 'lists' ? 'active' : ''} onClick={() => setPage('lists')}>Completed & outstanding</button></nav>
-    <section className="stats">
-      <div className="stat"><span>Total poles</span><strong>{poles.length}</strong></div><div className="stat"><span>Completed</span><strong>{done}</strong></div>
-      <div className="stat"><span>Outstanding</span><strong>{outstanding}</strong></div><div className="stat"><span>Problems</span><strong>{problems}</strong></div>
-    </section>
-    {page === 'map' && <section className="workspace">
-      <aside className="sidebar"><div className="field-label">PROJECT</div>
-        <select value={projectId} onChange={e => setProjectId(e.target.value)}>{projects.length === 0 && <option value="">No projects yet</option>}{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-        <div className="project-actions"><button className="ghost" disabled={!projectId} onClick={renameProject}>Rename</button><button className="ghost danger" disabled={!projectId} onClick={deleteProject}>Delete project</button></div>
-        <div className="pole-tools"><input placeholder="Search poles, grid refs or exchanges…" value={search} onChange={e => setSearch(e.target.value)} />
-          <select value={status} onChange={e => setStatus(e.target.value)}><option value="All">All statuses</option><option value="Outstanding">Outstanding</option><option value="Completed">Completed</option><option value="Problem">Problem</option></select>
-          <select multiple value={exchangeFilters} onChange={e => setExchangeFilters(Array.from(e.target.selectedOptions, o => o.value))} aria-label="Filter by exchange">
-            {exchanges.length === 0 && <option disabled>No exchange column found</option>}{exchanges.map(x => <option key={x} value={x}>{x}</option>)}
-          </select>
-        </div>
-        <div className="exchange-filter-footer"><p className="filter-hint">{exchanges.length ? 'Select one or more exchanges (⌘/Ctrl-click).' : 'No exchange values found in this spreadsheet.'}</p><button className="text-button" disabled={!exchangeFilters.length} onClick={() => setExchangeFilters([])}>Clear</button></div>
-        <div className="list-heading"><strong>Pole records</strong><span>{filtered.length} / {poles.length}</span></div>
-        <div className="pole-list">{filtered.map(p => <button key={p.id} className={`pole-row ${selected?.id === p.id ? 'active' : ''}`} onClick={() => setSelected(p)}>
-          <span className={`pin-dot ${p.status.toLowerCase()}`} /><span className="pole-row-main"><strong>{p.pole_ref || 'Unlabelled pole'}</strong><small>{p.grid_reference}{exchangeOf(p) ? ` · ${exchangeOf(p)}` : ''}</small></span><span className="row-chevron">›</span>
-        </button>)}{filtered.length === 0 && <p className="empty">No poles match these filters.</p>}</div>
-      </aside>
-      <div className="map-panel"><MapView key={projectId || 'empty'} poles={filtered} selected={selected} onEdit={setSelected} />
-        <div className="map-legend"><span><i className="legend-blue" />Outstanding</span><span><i className="legend-green" />Completed</span><span><i className="legend-red" />Problem</span></div>
-      </div>
-    </section>}
-    {page === 'spreadsheet' && <section className="data-page">
-      <div className="data-toolbar"><div><strong>{spreadsheetDraft.length} pole records</strong><p className="tiny muted">Pole reference and grid reference are fixed fields. Imported columns can be edited below.</p></div><div className="toolbar-actions"><button className="ghost" onClick={addColumn}>＋ Add column</button><button className="primary" disabled={savingSheet || !spreadsheetDraft.length} onClick={saveSpreadsheet}>{savingSheet ? 'Saving…' : 'Save all changes'}</button></div></div>
-      <div className="table-scroll"><table className="sheet-table"><thead><tr><th className="sticky-col">Pole reference</th><th>Grid reference</th><th>Status</th><th>Notes</th>{draftColumns.map(c => <th key={c}><div className="column-heading"><span>{c}</span><div><button title={`Rename ${c}`} onClick={() => renameColumn(c)}>✎</button><button title={`Delete ${c}`} onClick={() => deleteColumn(c)}>×</button></div></div></th>)}</tr></thead>
-        <tbody>{spreadsheetDraft.map(p => <tr key={p.id}><td className="sticky-col">{p.pole_ref || '—'}</td><td>{p.grid_reference}</td><td><select value={p.status} onChange={e => setSpreadsheetDraft(rows => rows.map(x => x.id === p.id ? { ...x, status: e.target.value } : x))}><option>Outstanding</option><option>Completed</option><option>Problem</option></select></td><td><input value={p.notes || ''} onChange={e => setSpreadsheetDraft(rows => rows.map(x => x.id === p.id ? { ...x, notes: e.target.value } : x))} /></td>{draftColumns.map(c => <td key={c}><input value={String(p.data?.[c] ?? '')} onChange={e => editDraft(p.id, c, e.target.value)} /></td>)}</tr>)}</tbody>
-      </table></div>
-      {!spreadsheetDraft.length && <p className="empty">Choose a project containing poles to edit its spreadsheet.</p>}
-    </section>}
-    {page === 'lists' && <section className="data-page list-page">
-      <div className="list-controls"><div className="status-tabs"><button className={listStatus === 'Outstanding' ? 'active' : ''} onClick={() => setListStatus('Outstanding')}>Outstanding ({outstanding})</button><button className={listStatus === 'Completed' ? 'active' : ''} onClick={() => setListStatus('Completed')}>Completed ({done})</button><button className={listStatus === 'Problem' ? 'active' : ''} onClick={() => setListStatus('Problem')}>Problems ({problems})</button></div><input placeholder="Search this list…" value={search} onChange={e => setSearch(e.target.value)} /></div>
-      <div className="record-table-wrap"><table className="record-table"><thead><tr><th>Pole reference</th><th>Grid reference</th><th>Exchange</th><th>Status</th><th>Notes</th><th></th></tr></thead><tbody>{listRows.map(p => <tr key={p.id}><td><strong>{p.pole_ref || 'Unlabelled pole'}</strong></td><td>{p.grid_reference}</td><td>{exchangeOf(p) || '—'}</td><td><span className={`status-pill ${p.status.toLowerCase()}`}>{p.status}</span></td><td>{p.notes || '—'}</td><td><button className="ghost" onClick={() => setSelected(p)}>View / edit</button></td></tr>)}</tbody></table>{!listRows.length && <p className="empty">No {listStatus.toLowerCase()} poles found.</p>}</div>
-    </section>}
-    {message && <div className="toast" onClick={() => setMessage('')}>{message} <b>×</b></div>}
-    {showImport && <div className="modal-backdrop"><div className="modal"><button className="close" onClick={() => setShowImport(false)}>×</button><p className="eyebrow">NEW PROJECT</p><h2>Import spreadsheet</h2>
-      <p className="muted">Each upload creates a separate project. The first worksheet is imported.</p><label>Project name</label><input value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. North Area – November 2026" />
-      <label>Excel or CSV file</label><input type="file" accept=".xlsx,.xls,.csv" onChange={e => setFile(e.target.files?.[0] || null)} />
-      <p className="tiny muted">A column containing British National Grid references is required. Exchange columns such as Exchange, Exchange Name or Exchange Code are available as filters.</p>
-      <button className="primary full" disabled={!file || !projectName.trim()} onClick={importFile}>Import poles and create project</button></div></div>}
-    {selected && <div className="modal-backdrop" onClick={() => setSelected(null)}><div className="modal detail-modal" onClick={e => e.stopPropagation()}>
-      <button className="close" onClick={() => setSelected(null)}>×</button><p className="eyebrow">POLE RECORD</p><h2>{selected.pole_ref || 'Pole details'}</h2>
-      <div className="detail-grid"><div><span>Grid reference</span><strong>{selected.grid_reference}</strong></div><div><span>Coordinates</span><strong>{selected.latitude.toFixed(5)}, {selected.longitude.toFixed(5)}</strong></div></div>
-      {exchangeOf(selected) && <p className="muted">Exchange: <strong>{exchangeOf(selected)}</strong></p>}
-      <label>Status</label><select value={selected.status} onChange={e => setSelected({ ...selected, status: e.target.value })}><option>Outstanding</option><option>Completed</option><option>Problem</option></select>
-      <label>Team notes</label><textarea rows={4} value={selected.notes || ''} onChange={e => setSelected({ ...selected, notes: e.target.value })} placeholder="Add notes or access information…" />
-      <div className="raw-data"><strong>Imported spreadsheet data</strong>{Object.entries(selected.data || {}).map(([k, v]) => <div key={k} className="raw-data-edit"><label>{k}</label><input value={String(v ?? '')} onChange={e => setSelected({ ...selected, data: { ...selected.data, [k]: e.target.value } })} /></div>)}</div>
-      <button className="primary full" onClick={savePole}>Save changes</button></div></div>}
-  </main>;
+  useEffect(()=>{document.documentElement.dataset.theme=theme;localStorage.setItem('pole-theme',theme);},[theme]);
+  async function loadProjects(keepId=true){const d=await api('projects',{},'GET');const list:Project[]=d.projects||[];setProjects(list);const next=keepId&&list.some(p=>p.id===projectId)?projectId:(list[0]?.id||'');setProjectId(next);return next;}
+  async function loadPoles(id:string){if(!id){setPoles([]);return;}const d=await api('poles',{project_id:id},'GET');setPoles(d.poles||[]);}
+  useEffect(()=>{loadProjects(false).catch(e=>setMessage(e.message)).finally(()=>setLoading(false));},[]);
+  useEffect(()=>{if(projectId)loadPoles(projectId).catch(e=>setMessage(e.message));else setPoles([]);},[projectId]);
+  const project=projects.find(p=>p.id===projectId);
+  const exchanges=useMemo(()=>[...new Set(poles.map(exchangeOf).filter(Boolean))].sort((a,b)=>a.localeCompare(b)),[poles]);
+  const filtered=useMemo(()=>poles.filter(p=>(statusFilter==='All'||p.status===statusFilter)&&(exchangeFilter==='All'||exchangeOf(p)===exchangeFilter)&&(`${p.pole_ref} ${p.grid_reference} ${p.notes} ${exchangeOf(p)} ${JSON.stringify(p.data||{})}`).toLowerCase().includes(search.toLowerCase())),[poles,statusFilter,exchangeFilter,search]);
+  const completed=poles.filter(p=>p.status==='Completed').length,problems=poles.filter(p=>p.status==='Problem').length,outstanding=poles.length-completed-problems;
+  function changePage(next:Page){setSelected(null);setPage(next);}
+  async function refresh(){if(!projectId)return;setBusy(true);try{await loadPoles(projectId);setMessage('Pole data updated.');}catch(e){setMessage(e instanceof Error?e.message:'Refresh failed');}finally{setBusy(false);}}
+  async function chooseFile(f:File|null){setFile(f);setWorkbookRows([]);setColumns([]);if(!f)return;try{const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});const rows=XLSX.utils.sheet_to_json<RawRow>(wb.Sheets[wb.SheetNames[0]],{defval:''});if(!rows.length)throw new Error('The first worksheet is empty.');const cols=Object.keys(rows[0]);setWorkbookRows(rows);setColumns(cols);setPoleColumn(findColumn(cols,['poleref','polenumber','poleid','assetid','reference']));setGridColumn(findColumn(cols,['gridreference','gridref','osgridreference','osgridref','nationalgridreference','ngr']));setExchangeColumn(findColumn(cols,['exchange','exchangename','exchangecode','exchangeid','exchangearea']));}catch(e){setMessage(e instanceof Error?e.message:'Could not read spreadsheet.');}}
+  async function importSpreadsheet(){if(!file||!projectName.trim()||!gridColumn)return;setBusy(true);try{const parsed=workbookRows.map(row=>{const grid=String(row[gridColumn]??'').trim();const coords=gridRefToLatLng(grid);return {pole_ref:poleColumn?String(row[poleColumn]??'').trim():'',grid_reference:grid,...(coords||{}),data:exchangeColumn?{...row,Exchange:row[exchangeColumn]}:row};}).filter(p=>'latitude'in p);if(!parsed.length)throw new Error('No valid British National Grid references were found in the selected column.');const d=await api('create_project',{name:projectName.trim(),filename:file.name,poles:parsed});setShowImport(false);setFile(null);setWorkbookRows([]);setProjectName('');await loadProjects(false);setProjectId(d.project.id);setPage('map');setMessage(`Imported ${d.imported} poles successfully.`);}catch(e){setMessage(e instanceof Error?e.message:'Import failed.');}finally{setBusy(false);}}
+  async function renameProject(p:Project){const name=window.prompt('Rename spreadsheet / project:',p.name)?.trim();if(!name||name===p.name)return;try{await api('rename_project',{id:p.id,name});setProjects(old=>old.map(x=>x.id===p.id?{...x,name}:x));setMessage('Project renamed.');}catch(e){setMessage(e instanceof Error?e.message:'Rename failed.');}}
+  async function deleteProject(p:Project){if(!window.confirm(`Delete “${p.name}” and all its pole records? This cannot be undone.`))return;try{await api('delete_project',{id:p.id});const left=projects.filter(x=>x.id!==p.id);setProjects(left);if(projectId===p.id){setProjectId(left[0]?.id||'');setPoles([]);}setMessage('Project deleted.');}catch(e){setMessage(e instanceof Error?e.message:'Delete failed.');}}
+  function openPole(p:Pole){setEditPole({...p,data:{...(p.data||{})}});setShowEdit(true);}
+  async function savePole(){if(!editPole)return;setBusy(true);try{const d=await api('update_pole',{id:editPole.id,status:editPole.status,notes:editPole.notes,data:editPole.data});setPoles(old=>old.map(p=>p.id===editPole.id?d.pole:p));setShowEdit(false);setEditPole(null);setMessage('Pole saved.');}catch(e){setMessage(e instanceof Error?e.message:'Could not save pole.');}finally{setBusy(false);}}
+  const nav=[{id:'map' as Page,label:'Map',icon:'⌖'},{id:'poles' as Page,label:'Poles',icon:'☷'},{id:'projects' as Page,label:'Projects',icon:'▦'},{id:'settings' as Page,label:'Settings',icon:'⚙'}];
+  if(loading)return <div className="loading-screen">Loading Pole Tracker…</div>;
+  return <div className="app-shell">
+    <header className="topbar"><div className="brand-lockup"><div className="brand-symbol small">PT</div><div><strong>Pole Tracker</strong><small>{project?.name||'Your field workspace'}</small></div></div><div className="top-actions">{project&&<button className="icon-btn" onClick={refresh} disabled={busy} aria-label="Refresh data">↻</button>}<button className="avatar-btn" onClick={()=>changePage('settings')}>⚙</button></div></header>
+    <main className={`main-content page-${page}`}>
+      {page==='map'&&<section className="map-screen"><div className="map-toolbar"><div className="map-project-select"><span>PROJECT</span><select value={projectId} onChange={e=>setProjectId(e.target.value)}><option value="">Choose a project</option>{projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div><div className="map-counter"><b>{filtered.length}</b><span>poles shown</span></div></div>
+        <div className="map-filter-row"><label className="searchbox"><span>⌕</span><input placeholder="Find a pole or grid reference" value={search} onChange={e=>setSearch(e.target.value)}/>{search&&<button onClick={()=>setSearch('')}>×</button>}</label><select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option>All</option>{STATUS.map(s=><option key={s}>{s}</option>)}</select><select value={exchangeFilter} onChange={e=>setExchangeFilter(e.target.value)}><option value="All">All exchanges</option>{exchanges.map(x=><option key={x}>{x}</option>)}</select></div>
+        <div className="map-canvas">{projectId?<MapView key={projectId} poles={filtered} selected={selected} onEdit={openPole}/>:<div className="map-empty"><div className="empty-icon">⌖</div><h2>Your map starts here</h2><p>Import a spreadsheet to plot your poles on the map.</p><button className="btn primary" onClick={()=>setShowImport(true)}>＋ Import spreadsheet</button></div>}<div className="map-legend"><span><i className="dot outstanding"/>Outstanding</span><span><i className="dot completed"/>Completed</span><span><i className="dot problem"/>Problem</span></div></div>
+        <div className="map-summary"><span><b>{poles.length}</b> total</span><span><i className="dot outstanding"/>{outstanding} outstanding</span><span><i className="dot completed"/>{completed} completed</span><span><i className="dot problem"/>{problems} problems</span></div>
+      </section>}
+      {page==='poles'&&<section className="content-page"><div className="page-heading"><div><span className="eyebrow">POLE REGISTER</span><h1>All poles</h1><p>{project?.name||'Select a project to view its records'}</p></div><span className="count-chip">{filtered.length} / {poles.length}</span></div><div className="filter-panel"><label className="searchbox"><span>⌕</span><input placeholder="Search pole, grid ref, notes…" value={search} onChange={e=>setSearch(e.target.value)}/>{search&&<button onClick={()=>setSearch('')}>×</button>}</label><div className="filter-selects"><select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option>All</option>{STATUS.map(s=><option key={s}>{s}</option>)}</select><select value={exchangeFilter} onChange={e=>setExchangeFilter(e.target.value)}><option value="All">All exchanges</option>{exchanges.map(x=><option key={x}>{x}</option>)}</select></div></div><div className="pole-cards">{filtered.map(p=><button className="pole-card" key={p.id} onClick={()=>openPole(p)}><span className={`status-marker ${p.status.toLowerCase()}`}/><span className="pole-card-main"><b>{p.pole_ref||'Unlabelled pole'}</b><small>{p.grid_reference} {exchangeOf(p)&&`· ${exchangeOf(p)}`}</small><small className="muted-line">{p.notes||'No notes added'}</small></span><span className={`status-pill ${p.status.toLowerCase()}`}>{p.status}</span><span className="chevron">›</span></button>)}{!filtered.length&&<div className="empty-state"><h3>No poles found</h3><p>Try changing the search or filters, or import a spreadsheet.</p></div>}</div></section>}
+      {page==='projects'&&<section className="content-page"><div className="page-heading"><div><span className="eyebrow">YOUR DATA</span><h1>Projects</h1><p>Imported spreadsheets and their pole records</p></div><button className="btn primary" onClick={()=>setShowImport(true)}>＋ Import</button></div><div className="project-list">{projects.map(p=><article className={`project-card ${p.id===projectId?'selected':''}`} key={p.id}><button className="project-main" onClick={()=>{setProjectId(p.id);changePage('map');}}><span className="project-file-icon">▤</span><span><b>{p.name}</b><small>{p.source_filename||'Imported spreadsheet'} · {displayDate(p.created_at)}</small></span><span className="chevron">›</span></button><div className="project-actions"><button onClick={()=>renameProject(p)}>Rename</button><button className="danger-text" onClick={()=>deleteProject(p)}>Delete</button></div></article>)}{!projects.length&&<div className="empty-state"><h3>No spreadsheets yet</h3><p>Import an Excel or CSV file to create your first project.</p><button className="btn primary" onClick={()=>setShowImport(true)}>Import spreadsheet</button></div>}</div></section>}
+      {page==='settings'&&<section className="content-page"><div className="page-heading"><div><span className="eyebrow">PREFERENCES</span><h1>Settings</h1><p>Make Pole Tracker feel right for your team</p></div></div><div className="settings-card"><div><b>Appearance</b><p>Choose a light or dark colour theme.</p></div><div className="theme-options"><button className={theme==='light'?'chosen':''} onClick={()=>setTheme('light')}><span className="theme-preview light-preview">☀</span><b>Light</b></button><button className={theme==='dark'?'chosen':''} onClick={()=>setTheme('dark')}><span className="theme-preview dark-preview">☾</span><b>Dark</b></button></div></div><div className="settings-card"><div><b>Shared workspace</b><p>All authorised team members can view and edit the same pole data.</p></div><button className="btn secondary" onClick={()=>{clearToken();onLogout();}}>Sign out</button></div><div className="settings-note">Your data remains stored in your existing Supabase project. Theme preference is saved on this device.</div></section>}
+    </main>
+    <nav className="bottom-nav" aria-label="Main navigation">{nav.map(n=><button key={n.id} className={page===n.id?'active':''} onClick={()=>changePage(n.id)}><span className="nav-icon">{n.icon}</span><small>{n.label}</small></button>)}</nav>
+    {showImport&&<div className="modal-backdrop" onClick={()=>setShowImport(false)}><div className="sheet-modal" onClick={e=>e.stopPropagation()}><div className="modal-grabber"/><div className="modal-title-row"><div><span className="eyebrow">NEW PROJECT</span><h2>Import spreadsheet</h2></div><button className="close-btn" onClick={()=>setShowImport(false)}>×</button></div><p className="modal-intro">Upload Excel or CSV. Choose which columns contain your pole reference, grid reference and exchange.</p><label className="field-label">PROJECT NAME</label><input className="form-input" value={projectName} onChange={e=>setProjectName(e.target.value)} placeholder="e.g. North Area – November"/><label className="field-label">SPREADSHEET FILE</label><input className="file-input" type="file" accept=".xlsx,.xls,.csv" onChange={e=>chooseFile(e.target.files?.[0]||null)}/>{columns.length>0&&<div className="mapping-box"><h3>Map spreadsheet columns</h3><p>Tell Pole Tracker which columns contain these fields.</p><label className="field-label">POLE REFERENCE</label><select className="form-input" value={poleColumn} onChange={e=>setPoleColumn(e.target.value)}><option value="">Not mapped</option>{columns.map(c=><option key={c}>{c}</option>)}</select><label className="field-label">BRITISH NATIONAL GRID REFERENCE <em>Required</em></label><select className="form-input" value={gridColumn} onChange={e=>setGridColumn(e.target.value)}><option value="">Select grid reference column</option>{columns.map(c=><option key={c}>{c}</option>)}</select><label className="field-label">EXCHANGE</label><select className="form-input" value={exchangeColumn} onChange={e=>setExchangeColumn(e.target.value)}><option value="">Not mapped</option>{columns.map(c=><option key={c}>{c}</option>)}</select><small>{workbookRows.length} spreadsheet rows found. Other columns will be kept as imported data.</small></div>}<button className="btn primary wide" disabled={busy||!file||!projectName.trim()||!gridColumn} onClick={importSpreadsheet}>{busy?'Importing…':'Import and map poles'}</button></div></div>}
+    {showEdit&&editPole&&<div className="modal-backdrop" onClick={()=>setShowEdit(false)}><div className="sheet-modal edit-modal" onClick={e=>e.stopPropagation()}><div className="modal-grabber"/><div className="modal-title-row"><div><span className="eyebrow">POLE DETAILS</span><h2>{editPole.pole_ref||'Pole record'}</h2></div><button className="close-btn" onClick={()=>setShowEdit(false)}>×</button></div><div className="detail-summary"><span>{editPole.grid_reference}</span><span>{editPole.latitude.toFixed(5)}, {editPole.longitude.toFixed(5)}</span></div><label className="field-label">STATUS</label><select className="form-input" value={editPole.status} onChange={e=>setEditPole({...editPole,status:e.target.value})}>{STATUS.map(s=><option key={s}>{s}</option>)}</select><label className="field-label">NOTES</label><textarea className="form-input" rows={3} value={editPole.notes||''} onChange={e=>setEditPole({...editPole,notes:e.target.value})} placeholder="Add field notes…"/><div className="data-fields"><h3>Spreadsheet fields</h3>{Object.entries(editPole.data||{}).map(([k,v])=><label key={k}>{k}<input className="form-input" value={String(v??'')} onChange={e=>setEditPole({...editPole,data:{...editPole.data,[k]:e.target.value}})}/></label>)}</div><button className="btn primary wide" disabled={busy} onClick={savePole}>{busy?'Saving…':'Save pole'}</button></div></div>}
+    {message&&<button className="toast" onClick={()=>setMessage('')}>{message}<b>×</b></button>}
+  </div>;
 }
-function App() { const [logged, setLogged] = useState(!!getToken()); return logged ? <Tracker onLogout={() => setLogged(false)} /> : <Login onLogin={() => setLogged(true)} />; }
-createRoot(document.getElementById('root')!).render(<App />);
+function App(){const[logged,setLogged]=useState(!!getToken());return logged?<Tracker onLogout={()=>setLogged(false)}/>:<Login onLogin={()=>setLogged(true)}/>;}
+createRoot(document.getElementById('root')!).render(<App/>);
