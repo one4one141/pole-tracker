@@ -92,3 +92,17 @@ npm run preview
 - No export, undo, conflict-resolution UI, or audit history yet.
 - The browser imports the first worksheet and sends the parsed rows to the Edge Function. The current import limit is 10,000 poles per upload.
 - OpenStreetMap standard tiles are used; review their usage policy before sustained business use.
+
+## Working Near Water poles (additive feature)
+
+This version adds a separate shared **Working Near Water** register. It does not change or delete the existing `projects` or `poles` tables.
+
+
+### One-time Supabase update
+1. In Supabase, open **SQL Editor** for the existing Pole Tracker project.
+2. Run the contents of `supabase/near-water-migration.sql` (creates only the new `near_water_poles` table and index).
+3. Deploy the updated Edge Function in `supabase/functions/pole-api/index.ts` using the same project link and existing secrets: `supabase functions deploy pole-api --no-verify-jwt`.
+4. Publish the frontend files to the existing GitHub Pages repository using the normal deployment workflow.
+
+
+Near-water records are shared between logged-in users. The form stores exchange, DP, CP, year, British grid reference, derived coordinates, tested status, notes (shown only when Tested), and an optional photo URL. The photo URL is a link field in this initial build; direct camera/file upload is not yet included.
