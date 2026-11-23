@@ -106,3 +106,12 @@ This version adds a separate shared **Working Near Water** register. It does not
 
 
 Near-water records are shared between logged-in users. The form stores exchange, DP, CP, year, British grid reference, derived coordinates, tested status, notes (shown only when Tested), and an optional photo URL. The photo URL is a link field in this initial build; direct camera/file upload is not yet included.
+
+
+## Low Wire feature deployment (additive)
+
+1. In Supabase SQL Editor, run `supabase/low-wire-migration.sql` once. It creates the separate `low_wire_poles` shared register.
+2. From this project folder, deploy the updated Edge Function with `supabase functions deploy pole-api --no-verify-jwt`.
+3. Upload/commit the updated website source to the existing GitHub Pages repository and wait for the Actions workflow to finish.
+
+Low Wire records include Exchange, DP, CP, A1024 Number, wire type (AC or DW), low-wire count, height in metres, UK grid reference, status (Fixed / In Progress / Reported), notes and optional photo URL. They are separate from spreadsheet and Near Water data.

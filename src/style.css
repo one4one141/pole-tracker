@@ -14,3 +14,25 @@
 
 /* Near-water map controls and navigation */
 .map-mode-row{display:flex;gap:8px;padding:8px 12px;background:var(--surface);border-bottom:1px solid var(--border)}.map-mode-row button{flex:1;border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:var(--muted);padding:9px 10px;font-size:11px;font-weight:800}.map-mode-row button.active{background:color-mix(in srgb,#8b5cf6 16%,var(--surface));border-color:#8b5cf6;color:var(--text)}.map-mode-row button span{display:inline-grid;place-items:center;min-width:19px;height:19px;margin-left:4px;border-radius:10px;background:#8b5cf6;color:white;font-size:10px}.near-water-dot{background:#8b5cf6}.water-navigate{display:inline-flex;align-items:center;border:0;border-radius:8px;padding:7px 10px;background:#6d45c6;color:white;text-decoration:none;font-size:10px;font-weight:800}.water-status-popup{display:inline-block;width:max-content;border-radius:8px;padding:5px 8px;background:#eee8ff;color:#6741b5;font-size:11px;font-weight:800}.popup-navigation{display:grid;gap:5px;margin-top:5px}.popup-navigation span{font-size:10px;color:#526879}.popup-navigation .nav-google{display:inline-block;width:max-content;border-radius:8px;padding:7px 10px;background:#6d45c6;color:#fff;text-decoration:none;font-size:11px;font-weight:800}
+/* Low Wire register */
+.bottom-nav{grid-template-columns:repeat(6,minmax(0,1fr))}
+.bottom-nav button{min-width:0;padding:3px 1px}
+.bottom-nav small{font-size:10px;white-space:nowrap}
+.map-mode-row button{min-width:0;flex:1;padding:8px 4px;font-size:10px}
+.map-mode-row button.lowwire-active{background:color-mix(in srgb,#f97316 15%,var(--surface));border-color:#f97316;color:var(--text)}
+.lowwire-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 12px}
+.lowwire-stats>div{display:grid;gap:3px;padding:12px 9px;border:1px solid var(--border);border-radius:14px;background:var(--surface);text-align:center}
+.lowwire-stats b{font-size:22px;color:var(--accent)}.lowwire-stats span{font-size:10px;color:var(--muted)}
+.lowwire-cards{display:grid;gap:10px;margin-top:12px}
+.lowwire-card{border:1px solid var(--border);border-radius:16px;padding:13px;background:var(--surface);cursor:pointer}
+.lowwire-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.lowwire-card-top b{font-size:14px}
+.lowwire-status{font-size:9px;font-weight:800;padding:6px 8px;border-radius:20px;white-space:nowrap}
+.lowwire-status.fixed{color:#20a56b;background:#20a56b20}.lowwire-status.in-progress{color:#d89c39;background:#d89c3920}.lowwire-status.reported{color:#e35c62;background:#e35c6220}
+.lowwire-details{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.lowwire-details span{display:grid;gap:4px;font-size:12px;font-weight:700}.lowwire-details small{font-size:9px;color:var(--muted)}
+.lowwire-facts{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin:0 0 8px}.lowwire-facts span{font-size:10px;color:var(--muted);font-weight:700;background:var(--surface3);padding:6px 8px;border-radius:9px}.lowwire-facts .wire-type{background:#f9731620;color:#f97316}
+.lowwire-card-actions{display:flex;justify-content:flex-end;gap:7px}.lowwire-card-actions button{border:0;border-radius:8px;padding:7px 10px;background:var(--surface3);color:var(--text);font-size:10px;font-weight:700}.lowwire-card-actions .danger-text{color:var(--red)}
+.lowwire-navigate{display:inline-flex;align-items:center;border:0;border-radius:8px;padding:7px 10px;background:#c65d18;color:white;text-decoration:none;font-size:10px;font-weight:800}
+.lowwire-status-options{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.lowwire-status-options button{border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:var(--text);padding:10px 5px;font-size:10px;font-weight:700}.lowwire-status-options button.selected{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.lowwire-input-row{grid-template-columns:repeat(2,1fr)}.lowwire-input-row input{width:100%}.lowwire-status-popup{display:inline-block;width:max-content;border-radius:8px;padding:5px 8px;background:#fff0e5;color:#b45309;font-size:11px;font-weight:800}
+.low-wire-dot{background:#f97316}
+@media(max-width:480px){.map-mode-row{gap:5px}.map-mode-row button{font-size:9px;padding:8px 2px}.bottom-nav{padding-left:3px;padding-right:3px}.bottom-nav small{font-size:9px}.nav-icon{font-size:22px}.lowwire-card-actions{gap:5px}.lowwire-card-actions button,.lowwire-navigate{padding:7px 8px}}
