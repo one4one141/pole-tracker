@@ -26,7 +26,7 @@ jobs:
       - name: Create published version file
         run: |
           mkdir -p public
-          printf '{"version":"%s"}\\n' "$GITHUB_SHA" > public/version.json
+          printf '{"version":"%s"}\n' "$GITHUB_SHA" > public/version.json
 
       - name: Setup Node
         uses: actions/setup-node@v4
